@@ -25,15 +25,15 @@ class AnalyseurRentabiliteImmobiliere:
         try:
             # Chargement DVF
             self.data_dvf = pd.read_csv(fichier_dvf, sep=';', encoding='latin-1')
-            print(f"DVF chargé: {len(self.data_dvf)} lignes")
+            st.write(f"DVF chargé: {len(self.data_dvf)} lignes")
             
             # Chargement loyers
             self.data_loyers = pd.read_csv(fichier_loyers, sep=';', encoding='latin-1')
-            print(f"Loyers chargé: {len(self.data_loyers)} lignes")
+            st.write(f"Loyers chargé: {len(self.data_loyers)} lignes")
             
             return True
         except Exception as e:
-            print(f"Erreur lors du chargement: {e}")
+            st.error(f"Erreur lors du chargement: {e}")
             return False
     
     def nettoyer_donnees_dvf(self):
@@ -41,8 +41,9 @@ class AnalyseurRentabiliteImmobiliere:
         if self.data_dvf is None:
             return False
             
-        # Supprimer la première colonne vide
-        self.data_dvf = self.data_dvf.drop(self.data_dvf.columns[0], axis=1)
+        # Supprimer la première colonne vide si elle existe
+        if self.data_dvf.columns[0] == 'Unnamed: 0' or self.data_dvf.iloc[:, 0].isna().all():
+            self.data_dvf = self.data_dvf.drop(self.data_dvf.columns[0], axis=1)
         
         # Nettoyer les valeurs foncières (remplacer virgule par point)
         self.data_dvf['Valeur fonciere'] = self.data_dvf['Valeur fonciere'].astype(str).str.replace(',', '.')
@@ -69,7 +70,7 @@ class AnalyseurRentabiliteImmobiliere:
             self.data_dvf['Code commune'].astype(str).str.zfill(3)
         )
         
-        print(f"DVF nettoyé: {len(self.data_dvf)} appartements valides")
+        st.write(f"DVF nettoyé: {len(self.data_dvf)} appartements valides")
         return True
     
     def nettoyer_donnees_loyers(self):
@@ -77,8 +78,9 @@ class AnalyseurRentabiliteImmobiliere:
         if self.data_loyers is None:
             return False
             
-        # Supprimer la première colonne vide
-        self.data_loyers = self.data_loyers.drop(self.data_loyers.columns[0], axis=1)
+        # Supprimer la première colonne vide si elle existe
+        if self.data_loyers.columns[0] == 'Unnamed: 0' or self.data_loyers.iloc[:, 0].isna().all():
+            self.data_loyers = self.data_loyers.drop(self.data_loyers.columns[0], axis=1)
         
         # Nettoyer les loyers (remplacer virgule par point)
         self.data_loyers['loypredm2'] = self.data_loyers['loypredm2'].astype(str).str.replace(',', '.')
@@ -93,7 +95,7 @@ class AnalyseurRentabiliteImmobiliere:
             (self.data_loyers['loypredm2'] < 50)  # Filtre aberrants
         ].copy()
         
-        print(f"Loyers nettoyé: {len(self.data_loyers)} observations valides")
+        st.write(f"Loyers nettoyé: {len(self.data_loyers)} observations valides")
         return True
     
     def calculer_prix_moyens_par_commune(self):
@@ -113,6 +115,7 @@ class AnalyseurRentabiliteImmobiliere:
         prix_moyens.columns = ['prix_m2_moyen', 'prix_m2_median', 'nb_ventes', 
                               'valeur_moyenne', 'surface_moyenne', 'code_postal', 'departement']
         prix_moyens = prix_moyens.reset_index()
+        prix_moyens['departement'] = prix_moyens['departement'].astype(str).str.zfill(2)
         
         return prix_moyens
     
@@ -130,8 +133,13 @@ class AnalyseurRentabiliteImmobiliere:
             on='insee_code',
             how='inner'
         )
+
+        self.data_merged['departement'] = self.data_merged['departement'].astype(str).str.zfill(2)
+        self.data_merged['DEP'] = self.data_merged['DEP'].astype(str).str.zfill(2)
+        self.data_merged['Commune'] = self.data_merged['Commune'].astype(str)
+        self.data_merged['LIBGEO'] = self.data_merged['LIBGEO'].astype(str)
         
-        print(f"Données fusionnées: {len(self.data_merged)} communes")
+        st.write(f"Données fusionnées: {len(self.data_merged)} communes")
         return True
     
     def calculer_rentabilite(self):
@@ -171,8 +179,12 @@ class AnalyseurRentabiliteImmobiliere:
         sample_data = self.data_merged.nlargest(echantillon, 'rentabilite_brute').copy()
         
         coords = []
-        for idx, row in sample_data.iterrows():
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for idx, (i, row) in enumerate(sample_data.iterrows()):
             try:
+                status_text.text(f"Géocodage: {row['Commune']} ({idx+1}/{len(sample_data)})")
                 location = self.geolocator.geocode(f"{row['Commune']}, France", timeout=10)
                 if location:
                     coords.append({
@@ -180,17 +192,23 @@ class AnalyseurRentabiliteImmobiliere:
                         'latitude': location.latitude,
                         'longitude': location.longitude
                     })
-                    print(f"Géocodage: {row['Commune']} - OK")
-                else:
-                    print(f"Géocodage: {row['Commune']} - Échec")
+                
+                # Mettre à jour la barre de progression
+                progress_bar.progress((idx + 1) / len(sample_data))
+                time.sleep(0.1)  # Pause pour éviter trop de requêtes
+                
             except Exception as e:
-                print(f"Erreur géocodage {row['Commune']}: {e}")
+                st.warning(f"Erreur géocodage {row['Commune']}: {e}")
                 continue
+        
+        progress_bar.empty()
+        status_text.empty()
         
         # Fusionner avec les données principales
         coords_df = pd.DataFrame(coords)
         if not coords_df.empty:
             self.data_merged = pd.merge(self.data_merged, coords_df, on='insee_code', how='left')
+            st.success(f"Géocodage terminé: {len(coords_df)} communes géolocalisées")
         
         return True
     
@@ -203,7 +221,7 @@ class AnalyseurRentabiliteImmobiliere:
         data_carte = self.data_merged.dropna(subset=['latitude', 'longitude'])
         
         if data_carte.empty:
-            print("Aucune coordonnée disponible pour la carte")
+            st.warning("Aucune coordonnée disponible pour la carte")
             return None
         
         # Créer la carte centrée sur la France
@@ -293,7 +311,7 @@ class AnalyseurRentabiliteImmobiliere:
                 'Répartition par attractivité'
             ),
             specs=[[{"secondary_y": False}, {"secondary_y": False}],
-                   [{"secondary_y": False}, {"secondary_y": False}]]
+                   [{"secondary_y": False}, {"type": "domain"}]]
         )
         
         # 1. Histogramme rentabilité
@@ -340,113 +358,6 @@ class AnalyseurRentabiliteImmobiliere:
         
         fig.update_layout(height=800, showlegend=False, title_text="Analyse de Rentabilité Immobilière")
         return fig
-
-    def traitement_complet_avec_progress(self, fichier_dvf, fichier_loyers):
-        """Traitement complet avec barre de progression"""
-        
-        # Créer les éléments de progression
-        progress_container = st.container()
-        
-        with progress_container:
-            st.write("### 📈 Progression de l'analyse")
-            
-            # Barre de progression et status
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # Métriques en temps réel
-            col1, col2, col3 = st.columns(3)
-            
-            try:
-                # Étape 1 : Chargement DVF (0-20%)
-                status_text.text('📁 Chargement du fichier DVF...')
-                with col1:
-                    st.metric("Étape", "1/6")
-                with col2:
-                    st.metric("Progression", "0%")
-                with col3:
-                    st.metric("Statut", "En cours")
-                
-                self.data_dvf = pd.read_csv(fichier_dvf, sep=';', encoding='latin-1')
-                progress_bar.progress(20)
-                st.write(f"✅ DVF chargé: {len(self.data_dvf):,} lignes")
-                
-                # Étape 2 : Chargement loyers (20-35%)
-                status_text.text('📁 Chargement du fichier loyers...')
-                with col1:
-                    st.metric("Étape", "2/6")
-                with col2:
-                    st.metric("Progression", "20%")
-                
-                self.data_loyers = pd.read_csv(fichier_loyers, sep=';', encoding='latin-1')
-                progress_bar.progress(35)
-                st.write(f"✅ Loyers chargé: {len(self.data_loyers):,} lignes")
-                
-                # Étape 3 : Nettoyage DVF (35-55%)
-                status_text.text('🧹 Nettoyage des données DVF...')
-                with col1:
-                    st.metric("Étape", "3/6")
-                with col2:
-                    st.metric("Progression", "35%")
-                
-                self.nettoyer_donnees_dvf()
-                progress_bar.progress(55)
-                st.write(f"✅ DVF nettoyé: {len(self.data_dvf):,} appartements valides")
-                
-                # Étape 4 : Nettoyage loyers (55-70%)
-                status_text.text('🧹 Nettoyage des données loyers...')
-                with col1:
-                    st.metric("Étape", "4/6")
-                with col2:
-                    st.metric("Progression", "55%")
-                
-                self.nettoyer_donnees_loyers()
-                progress_bar.progress(70)
-                st.write(f"✅ Loyers nettoyé: {len(self.data_loyers):,} observations valides")
-                
-                # Étape 5 : Fusion (70-85%)
-                status_text.text('🔗 Fusion des données...')
-                with col1:
-                    st.metric("Étape", "5/6")
-                with col2:
-                    st.metric("Progression", "70%")
-                
-                self.fusionner_donnees()
-                progress_bar.progress(85)
-                st.write(f"✅ Données fusionnées: {len(self.data_merged):,} communes")
-                
-                # Étape 6 : Calculs (85-100%)
-                status_text.text('📊 Calcul des rentabilités...')
-                with col1:
-                    st.metric("Étape", "6/6")
-                with col2:
-                    st.metric("Progression", "85%")
-                
-                self.calculer_rentabilite()
-                progress_bar.progress(100)
-                
-                # Status final
-                status_text.text('✅ Analyse terminée avec succès!')
-                with col2:
-                    st.metric("Progression", "100%")
-                with col3:
-                    st.metric("Statut", "Terminé")
-                
-                time.sleep(1)  # Laisser voir le 100%
-                
-                # Nettoyage des éléments de progression
-                progress_bar.empty()
-                status_text.empty()
-                
-                return True
-                
-            except Exception as e:
-                status_text.text(f'❌ Erreur: {str(e)}')
-                with col3:
-                    st.metric("Statut", "Erreur")
-                st.error(f"Erreur lors du traitement: {e}")
-                return False
-
     
     def generer_rapport(self):
         """Génère un rapport de synthèse"""
@@ -456,17 +367,17 @@ class AnalyseurRentabiliteImmobiliere:
         stats = self.data_merged.describe()
         
         rapport = f"""
-    RAPPORT D'ANALYSE DE RENTABILITÉ IMMOBILIÈRE
-    ===========================================
+RAPPORT D'ANALYSE DE RENTABILITÉ IMMOBILIÈRE
+===========================================
 
-    📊 STATISTIQUES GÉNÉRALES
-    - Nombre de communes analysées: {len(self.data_merged)}
-    - Prix moyen d'achat: {self.data_merged['prix_m2_moyen'].mean():.0f}€/m²
-    - Loyer moyen: {self.data_loyers['loypredm2'].mean():.2f}€/m²/mois
-    - Rentabilité brute moyenne: {self.data_merged['rentabilite_brute'].mean():.2f}%
+📊 STATISTIQUES GÉNÉRALES
+- Nombre de communes analysées: {len(self.data_merged)}
+- Prix moyen d'achat: {self.data_merged['prix_m2_moyen'].mean():.0f}€/m²
+- Loyer moyen: {self.data_merged['loypredm2'].mean():.2f}€/m²/mois
+- Rentabilité brute moyenne: {self.data_merged['rentabilite_brute'].mean():.2f}%
 
-    🏆 MEILLEURES OPPORTUNITÉS (Top 5)
-    """
+🏆 MEILLEURES OPPORTUNITÉS (Top 5)
+"""
         
         top_5 = self.data_merged.nlargest(5, 'rentabilite_brute')
         for i, (_, row) in enumerate(top_5.iterrows(), 1):
@@ -474,21 +385,21 @@ class AnalyseurRentabiliteImmobiliere:
             dept = str(row['departement']).zfill(2) if isinstance(row['departement'], (int, float, str)) else row['departement']
             
             rapport += f"""
-    {i}. {row['Commune']} ({dept})
-    💰 Prix: {row['prix_m2_moyen']:.0f}€/m² | Loyer: {row['loypredm2']:.1f}€/m²
-    📈 Rentabilité: {row['rentabilite_brute']:.2f}% | Attractivité: {row['attractivite']}
-    """
+{i}. {row['Commune']} ({dept})
+💰 Prix: {row['prix_m2_moyen']:.0f}€/m² | Loyer: {row['loypredm2']:.1f}€/m²
+📈 Rentabilité: {row['rentabilite_brute']:.2f}% | Attractivité: {row['attractivite']}
+"""
         
         rapport += f"""
-    📊 RÉPARTITION PAR ATTRACTIVITÉ
-    {self.data_merged['attractivite'].value_counts().to_string()}
+📊 RÉPARTITION PAR ATTRACTIVITÉ
+{self.data_merged['attractivite'].value_counts().to_string()}
 
-    ⚠️ NOTES IMPORTANTES
-    - Ces calculs sont basés sur des données moyennes
-    - La rentabilité réelle dépend de nombreux facteurs (charges, vacance, travaux...)
-    - Il est recommandé de faire une étude détaillée avant tout investissement
-    - Les données de loyer sont des estimations prédictives
-    """
+⚠️ NOTES IMPORTANTES
+- Ces calculs sont basés sur des données moyennes
+- La rentabilité réelle dépend de nombreux facteurs (charges, vacance, travaux...)
+- Il est recommandé de faire une étude détaillée avant tout investissement
+- Les données de loyer sont des estimations prédictives
+"""
     
         return rapport
 
@@ -513,15 +424,24 @@ def main():
         # Initialiser l'analyseur
         analyseur = AnalyseurRentabiliteImmobiliere()
         
-        # Chargement et traitement des données
-        with st.spinner("Chargement et traitement des données..."):
-            if analyseur.charger_donnees(fichier_dvf, fichier_loyers):
-                analyseur.nettoyer_donnees_dvf()
-                analyseur.nettoyer_donnees_loyers()
-                analyseur.fusionner_donnees()
-                analyseur.calculer_rentabilite()
+        # Bouton pour lancer l'analyse
+        if st.sidebar.button("🚀 Lancer l'analyse"):
+            # Chargement et traitement des données
+            with st.spinner("Chargement et traitement des données..."):
+                if analyseur.charger_donnees(fichier_dvf, fichier_loyers):
+                    analyseur.nettoyer_donnees_dvf()
+                    analyseur.nettoyer_donnees_loyers()
+                    analyseur.fusionner_donnees()
+                    analyseur.calculer_rentabilite()
+                    
+                    # Stocker l'analyseur dans le session state
+                    st.session_state.analyseur = analyseur
+                    st.session_state.analyse_terminee = True
         
-        if analyseur.data_merged is not None:
+        # Afficher les résultats si l'analyse est terminée
+        if hasattr(st.session_state, 'analyse_terminee') and st.session_state.analyse_terminee:
+            analyseur = st.session_state.analyseur
+            
             st.success(f"✅ Analyse terminée - {len(analyseur.data_merged)} communes analysées")
             
             # Onglets principaux
@@ -555,6 +475,7 @@ def main():
             
             with tab2:
                 st.header("🗺️ Carte de rentabilité")
+                st.info("⚠️ Le géocodage peut prendre plusieurs minutes...")
                 
                 # Option pour géocoder
                 if st.button("🌍 Générer la carte (géocodage des communes)"):
@@ -564,9 +485,9 @@ def main():
                         
                         if carte:
                             st.success("Carte générée avec succès!")
-                            # Note: Dans Streamlit, vous devriez utiliser folium_static pour afficher la carte
-                            # st.components.v1.html(carte._repr_html_(), height=600)
-                            st.info("Carte générée - utilisez folium_static pour l'affichage dans Streamlit")
+                            # Afficher la carte avec st_folium ou composant HTML
+                            from streamlit_folium import st_folium
+                            st_folium(carte, width=700, height=500)
                         else:
                             st.error("Impossible de générer la carte")
             
@@ -590,42 +511,80 @@ def main():
                     file_name="rapport_rentabilite_immobiliere.txt",
                     mime="text/plain"
                 )
-
-if __name__ == "__main__":
-    # Pour utilisation en ligne de commande
-    analyseur = AnalyseurRentabiliteImmobiliere()
     
-    # Chargement des données
-    if analyseur.charger_donnees('./data/dvf.csv', './data/loyers.csv'):
-        print("✅ Données chargées")
-        
-        # Nettoyage
-        analyseur.nettoyer_donnees_dvf()
-        analyseur.nettoyer_donnees_loyers()
-        
-        # Fusion et calculs
-        if analyseur.fusionner_donnees():
-            analyseur.calculer_rentabilite()
-            
-            # Analyses
-            print("\n📊 ANALYSE TERMINÉE")
-            print(f"Communes analysées: {len(analyseur.data_merged)}")
-            
-            # Top communes
-            top_communes = analyseur.analyser_top_communes(10)
-            print("\n🏆 TOP 10 COMMUNES:")
-            print(top_communes.to_string(index=False))
-            
-            # Sauvegarde des résultats
-            analyseur.data_merged.to_csv('resultats_rentabilite.csv', index=False, sep=';')
-            print("\n💾 Résultats sauvegardés dans 'resultats_rentabilite.csv'")
-            
-            # Rapport
-            rapport = analyseur.generer_rapport()
-            with open('rapport_rentabilite.txt', 'w', encoding='utf-8') as f:
-                f.write(rapport)
-            print("📋 Rapport sauvegardé dans 'rapport_rentabilite.txt'")
-        else:
-            print("❌ Erreur lors de la fusion des données")
     else:
-        print("❌ Erreur lors du chargement des données")
+        st.info("👆 Veuillez charger les deux fichiers CSV dans la barre latérale pour commencer l'analyse.")
+        
+        # Instructions d'utilisation
+        st.markdown("""
+        ### Instructions d'utilisation
+        
+        1. **Fichier DVF** : Données de ventes immobilières (Demandes de Valeurs Foncières)
+        2. **Fichier Loyers** : Données de loyers prédictifs par commune
+        
+        ### Format attendu des fichiers
+        
+        **DVF** : Colonnes requises
+        - `Valeur fonciere` : Prix de vente
+        - `Surface Carrez du 1er lot` : Surface de l'appartement
+        - `Type local` : Type de bien (filtré sur 'Appartement')
+        - `Code departement` et `Code commune` : Codes géographiques
+        - `Commune` : Nom de la commune
+        
+        **Loyers** : Colonnes requises
+        - `loypredm2` : Loyer prédit au m²
+        - `INSEE_C` : Code INSEE de la commune
+        - `LIBGEO` : Nom de la commune
+        
+        ### Métriques calculées
+        - **Rentabilité brute** : (Loyer annuel / Prix d'achat) × 100
+        - **Rentabilité nette** : Rentabilité brute × 0.85 (estimation)
+        - **Classification** : Excellente (≥8%), Très bonne (6-8%), Bonne (4-6%), etc.
+        """)
+
+# Point d'entrée principal
+if __name__ == "__main__":
+    # Vérifier si on est en mode Streamlit
+    try:
+        import streamlit as st
+        # Si on arrive ici, on est en mode Streamlit
+        main()
+    except ImportError:
+        # Mode ligne de commande
+        print("Mode ligne de commande - Streamlit non disponible")
+        analyseur = AnalyseurRentabiliteImmobiliere()
+        
+        # Chargement des données
+        if analyseur.charger_donnees('./data/dvf.csv', './data/loyers.csv'):
+            print("✅ Données chargées")
+            
+            # Nettoyage
+            analyseur.nettoyer_donnees_dvf()
+            analyseur.nettoyer_donnees_loyers()
+            
+            # Fusion et calculs
+            if analyseur.fusionner_donnees():
+                analyseur.calculer_rentabilite()
+                
+                # Analyses
+                print("\n📊 ANALYSE TERMINÉE")
+                print(f"Communes analysées: {len(analyseur.data_merged)}")
+                
+                # Top communes
+                top_communes = analyseur.analyser_top_communes(10)
+                print("\n🏆 TOP 10 COMMUNES:")
+                print(top_communes.to_string(index=False))
+                
+                # Sauvegarde des résultats
+                analyseur.data_merged.to_csv('resultats_rentabilite.csv', index=False, sep=';')
+                print("\n💾 Résultats sauvegardés dans 'resultats_rentabilite.csv'")
+                
+                # Rapport
+                rapport = analyseur.generer_rapport()
+                with open('rapport_rentabilite.txt', 'w', encoding='utf-8') as f:
+                    f.write(rapport)
+                print("📋 Rapport sauvegardé dans 'rapport_rentabilite.txt'")
+            else:
+                print("❌ Erreur lors de la fusion des données")
+        else:
+            print("❌ Erreur lors du chargement des données")
