@@ -2,344 +2,630 @@ import pandas as pd
 import numpy as np
 import folium
 from folium import plugins
-import requests
-import json
 import streamlit as st
-from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import time
+import requests
+import json
+from geopy.geocoders import Nominatim
+import warnings
+warnings.filterwarnings('ignore')
 
-class RealEstateAnalyzer:
+class AnalyseurRentabiliteImmobiliere:
     def __init__(self):
-        self.data = None
-        self.map_france = None
+        self.data_dvf = None
+        self.data_loyers = None
+        self.data_merged = None
+        self.geolocator = Nominatim(user_agent="rentabilite_immobiliere")
         
-    def load_sample_data(self):
-        """Charge des données d'exemple pour les principales villes françaises"""
-        # Données d'exemple basées sur des moyennes approximatives (à remplacer par de vraies données)
-        cities_data = {
-            'ville': ['Paris', 'Lyon', 'Marseille', 'Toulouse', 'Nice', 'Nantes', 
-                     'Montpellier', 'Strasbourg', 'Bordeaux', 'Lille', 'Rennes', 
-                     'Reims', 'Saint-Étienne', 'Toulon', 'Le Havre', 'Grenoble',
-                     'Dijon', 'Angers', 'Nîmes', 'Villeurbanne'],
-            'latitude': [48.8566, 45.7640, 43.2965, 43.6047, 43.7102, 47.2184,
-                        43.6110, 48.5734, 44.8378, 50.6292, 48.1173, 49.2583,
-                        45.4397, 43.1242, 49.4944, 45.1885, 47.3220, 47.4784,
-                        43.8367, 45.7797],
-            'longitude': [2.3522, 4.8357, 5.3698, 1.4442, 7.2619, -1.5536,
-                         3.8767, 7.7521, -0.5792, 3.0573, -1.6778, 4.0317,
-                         4.3872, 5.9280, 0.1079, 5.7245, 5.0415, -0.5632,
-                         4.3601, 4.8732],
-            'prix_achat_m2': [11000, 4500, 3800, 3200, 4800, 3500, 3400, 3300, 4200,
-                             2800, 3600, 2200, 1800, 3500, 2100, 3200, 2900, 2600,
-                             2400, 4000],
-            'loyer_m2_mois': [30, 13, 12, 11, 16, 12, 12, 12, 14, 10, 12, 8, 7,
-                             12, 8, 11, 10, 9, 9, 13],
-            'population': [2161000, 515695, 870731, 479553, 340017, 314138,
-                          285121, 280966, 257068, 232787, 217728, 182592,
-                          171057, 176198, 170147, 158552, 156920, 154508,
-                          148561, 149019]
-        }
-        
-        self.data = pd.DataFrame(cities_data)
-        self.calculate_profitability_metrics()
-        
-    def calculate_profitability_metrics(self):
-        """Calcule les différents indices de rentabilité"""
-        # Rentabilité brute annuelle
-        self.data['loyer_annuel_m2'] = self.data['loyer_m2_mois'] * 12
-        self.data['rentabilite_brute'] = (self.data['loyer_annuel_m2'] / self.data['prix_achat_m2']) * 100
-        
-        # Rentabilité nette (estimation avec 20% de charges)
-        self.data['rentabilite_nette'] = self.data['rentabilite_brute'] * 0.8
-        
-        # Cash-flow pour un appartement de 50m²
-        surface_type = 50
-        self.data['prix_achat_total'] = self.data['prix_achat_m2'] * surface_type
-        self.data['loyer_mensuel_total'] = self.data['loyer_m2_mois'] * surface_type
-        self.data['loyer_annuel_total'] = self.data['loyer_mensuel_total'] * 12
-        
-        # Calcul du cash-flow (estimation avec emprunt à 80% sur 20 ans à 3.5%)
-        taux_emprunt = 0.035
-        duree_emprunt = 20
-        pourcentage_emprunt = 0.8
-        
-        self.data['montant_emprunt'] = self.data['prix_achat_total'] * pourcentage_emprunt
-        self.data['mensualite_emprunt'] = self.calculate_monthly_payment(
-            self.data['montant_emprunt'], taux_emprunt, duree_emprunt
-        )
-        self.data['cash_flow_mensuel'] = (self.data['loyer_mensuel_total'] * 0.8) - self.data['mensualite_emprunt']
-        
-        # Temps de retour sur investissement (apport initial)
-        self.data['apport_initial'] = self.data['prix_achat_total'] * (1 - pourcentage_emprunt)
-        self.data['temps_retour_annees'] = self.data['apport_initial'] / (self.data['cash_flow_mensuel'] * 12)
-        
-        # Score global de rentabilité (pondération des différents critères)
-        self.data['score_rentabilite'] = (
-            self.data['rentabilite_brute'] * 0.4 +
-            (self.data['cash_flow_mensuel'] / 100) * 0.3 +
-            (10 / self.data['temps_retour_annees']) * 0.3
-        )
+    def charger_donnees(self, fichier_dvf, fichier_loyers):
+        """Charge et nettoie les données DVF et loyers"""
+        try:
+            # Chargement DVF
+            self.data_dvf = pd.read_csv(fichier_dvf, sep=';', encoding='latin-1')
+            print(f"DVF chargé: {len(self.data_dvf)} lignes")
+            
+            # Chargement loyers
+            self.data_loyers = pd.read_csv(fichier_loyers, sep=';', encoding='latin-1')
+            print(f"Loyers chargé: {len(self.data_loyers)} lignes")
+            
+            return True
+        except Exception as e:
+            print(f"Erreur lors du chargement: {e}")
+            return False
     
-    def calculate_monthly_payment(self, principal, annual_rate, years):
-        """Calcule la mensualité d'un emprunt"""
-        monthly_rate = annual_rate / 12
-        num_payments = years * 12
-        if monthly_rate == 0:
-            return principal / num_payments
-        return principal * (monthly_rate * (1 + monthly_rate)**num_payments) / ((1 + monthly_rate)**num_payments - 1)
-    
-    def create_interactive_map(self):
-        """Crée une carte interactive avec les données de rentabilité"""
-        # Centre de la France
-        center_lat, center_lon = 46.2276, 2.2137
+    def nettoyer_donnees_dvf(self):
+        """Nettoie et prépare les données DVF"""
+        if self.data_dvf is None:
+            return False
+            
+        # Supprimer la première colonne vide
+        self.data_dvf = self.data_dvf.drop(self.data_dvf.columns[0], axis=1)
         
-        # Créer la carte
-        m = folium.Map(
-            location=[center_lat, center_lon],
+        # Nettoyer les valeurs foncières (remplacer virgule par point)
+        self.data_dvf['Valeur fonciere'] = self.data_dvf['Valeur fonciere'].astype(str).str.replace(',', '.')
+        self.data_dvf['Valeur fonciere'] = pd.to_numeric(self.data_dvf['Valeur fonciere'], errors='coerce')
+        
+        # Nettoyer les surfaces
+        self.data_dvf['Surface Carrez du 1er lot'] = self.data_dvf['Surface Carrez du 1er lot'].astype(str).str.replace(',', '.')
+        self.data_dvf['Surface Carrez du 1er lot'] = pd.to_numeric(self.data_dvf['Surface Carrez du 1er lot'], errors='coerce')
+        
+        # Filtrer les données valides
+        self.data_dvf = self.data_dvf[
+            (self.data_dvf['Type local'] == 'Appartement') &
+            (self.data_dvf['Valeur fonciere'] > 0) &
+            (self.data_dvf['Surface Carrez du 1er lot'] > 0) &
+            (self.data_dvf['Valeur fonciere'] < 2000000)  # Filtre aberrants
+        ].copy()
+        
+        # Calculer le prix au m²
+        self.data_dvf['prix_m2'] = self.data_dvf['Valeur fonciere'] / self.data_dvf['Surface Carrez du 1er lot']
+        
+        # Créer code INSEE à 5 chiffres
+        self.data_dvf['insee_code'] = (
+            self.data_dvf['Code departement'].astype(str).str.zfill(2) + 
+            self.data_dvf['Code commune'].astype(str).str.zfill(3)
+        )
+        
+        print(f"DVF nettoyé: {len(self.data_dvf)} appartements valides")
+        return True
+    
+    def nettoyer_donnees_loyers(self):
+        """Nettoie et prépare les données de loyers"""
+        if self.data_loyers is None:
+            return False
+            
+        # Supprimer la première colonne vide
+        self.data_loyers = self.data_loyers.drop(self.data_loyers.columns[0], axis=1)
+        
+        # Nettoyer les loyers (remplacer virgule par point)
+        self.data_loyers['loypredm2'] = self.data_loyers['loypredm2'].astype(str).str.replace(',', '.')
+        self.data_loyers['loypredm2'] = pd.to_numeric(self.data_loyers['loypredm2'], errors='coerce')
+        
+        # Créer code INSEE à 5 chiffres
+        self.data_loyers['insee_code'] = self.data_loyers['INSEE_C'].astype(str).str.zfill(5)
+        
+        # Filtrer les loyers valides
+        self.data_loyers = self.data_loyers[
+            (self.data_loyers['loypredm2'] > 0) &
+            (self.data_loyers['loypredm2'] < 50)  # Filtre aberrants
+        ].copy()
+        
+        print(f"Loyers nettoyé: {len(self.data_loyers)} observations valides")
+        return True
+    
+    def calculer_prix_moyens_par_commune(self):
+        """Calcule les prix moyens de vente par commune"""
+        if self.data_dvf is None:
+            return None
+            
+        prix_moyens = self.data_dvf.groupby(['insee_code', 'Commune']).agg({
+            'prix_m2': ['mean', 'median', 'count'],
+            'Valeur fonciere': 'mean',
+            'Surface Carrez du 1er lot': 'mean',
+            'Code postal': 'first',
+            'Code departement': 'first'
+        }).round(2)
+        
+        # Aplatir les colonnes multi-index
+        prix_moyens.columns = ['prix_m2_moyen', 'prix_m2_median', 'nb_ventes', 
+                              'valeur_moyenne', 'surface_moyenne', 'code_postal', 'departement']
+        prix_moyens = prix_moyens.reset_index()
+        
+        return prix_moyens
+    
+    def fusionner_donnees(self):
+        """Fusionne les données de vente et de location"""
+        prix_moyens = self.calculer_prix_moyens_par_commune()
+        
+        if prix_moyens is None or self.data_loyers is None:
+            return False
+        
+        # Fusion sur le code INSEE
+        self.data_merged = pd.merge(
+            prix_moyens, 
+            self.data_loyers[['insee_code', 'LIBGEO', 'DEP', 'loypredm2']],
+            on='insee_code',
+            how='inner'
+        )
+        
+        print(f"Données fusionnées: {len(self.data_merged)} communes")
+        return True
+    
+    def calculer_rentabilite(self):
+        """Calcule les indices de rentabilité"""
+        if self.data_merged is None:
+            return False
+        
+        # Rentabilité brute annuelle (%)
+        self.data_merged['rentabilite_brute'] = (
+            (self.data_merged['loypredm2'] * 12) / self.data_merged['prix_m2_moyen']
+        ) * 100
+        
+        # Rentabilité nette estimée (85% de la brute)
+        self.data_merged['rentabilite_nette'] = self.data_merged['rentabilite_brute'] * 0.85
+        
+        # Ratio prix/loyer
+        self.data_merged['ratio_prix_loyer'] = self.data_merged['prix_m2_moyen'] / self.data_merged['loypredm2']
+        
+        # Classification de l'attractivité
+        conditions = [
+            self.data_merged['rentabilite_brute'] >= 8,
+            self.data_merged['rentabilite_brute'] >= 6,
+            self.data_merged['rentabilite_brute'] >= 4,
+            self.data_merged['rentabilite_brute'] >= 2
+        ]
+        choices = ['Excellente', 'Très bonne', 'Bonne', 'Correcte']
+        self.data_merged['attractivite'] = np.select(conditions, choices, 'Faible')
+        
+        return True
+    
+    def obtenir_coordonnees_communes(self, echantillon=100):
+        """Obtient les coordonnées GPS d'un échantillon de communes"""
+        if self.data_merged is None:
+            return False
+        
+        # Prendre un échantillon pour éviter trop de requêtes API
+        sample_data = self.data_merged.nlargest(echantillon, 'rentabilite_brute').copy()
+        
+        coords = []
+        for idx, row in sample_data.iterrows():
+            try:
+                location = self.geolocator.geocode(f"{row['Commune']}, France", timeout=10)
+                if location:
+                    coords.append({
+                        'insee_code': row['insee_code'],
+                        'latitude': location.latitude,
+                        'longitude': location.longitude
+                    })
+                    print(f"Géocodage: {row['Commune']} - OK")
+                else:
+                    print(f"Géocodage: {row['Commune']} - Échec")
+            except Exception as e:
+                print(f"Erreur géocodage {row['Commune']}: {e}")
+                continue
+        
+        # Fusionner avec les données principales
+        coords_df = pd.DataFrame(coords)
+        if not coords_df.empty:
+            self.data_merged = pd.merge(self.data_merged, coords_df, on='insee_code', how='left')
+        
+        return True
+    
+    def creer_carte_rentabilite(self):
+        """Crée une carte interactive de la rentabilité"""
+        if self.data_merged is None:
+            return None
+        
+        # Filtrer les communes avec coordonnées
+        data_carte = self.data_merged.dropna(subset=['latitude', 'longitude'])
+        
+        if data_carte.empty:
+            print("Aucune coordonnée disponible pour la carte")
+            return None
+        
+        # Créer la carte centrée sur la France
+        carte = folium.Map(
+            location=[46.603354, 1.888334],
             zoom_start=6,
             tiles='OpenStreetMap'
         )
         
-        # Normaliser les scores pour les couleurs
-        min_score = self.data['score_rentabilite'].min()
-        max_score = self.data['score_rentabilite'].max()
-        
-        # Ajouter les marqueurs pour chaque ville
-        for idx, row in self.data.iterrows():
-            # Couleur basée sur le score de rentabilité
-            score_norm = (row['score_rentabilite'] - min_score) / (max_score - min_score)
-            if score_norm > 0.7:
-                color = 'green'
-                icon = 'arrow-up'
-            elif score_norm > 0.4:
-                color = 'orange'
-                icon = 'minus'
+        # Couleurs selon la rentabilité
+        def get_color(rentabilite):
+            if rentabilite >= 8:
+                return 'green'
+            elif rentabilite >= 6:
+                return 'lightgreen'
+            elif rentabilite >= 4:
+                return 'orange'
+            elif rentabilite >= 2:
+                return 'red'
             else:
-                color = 'red'
-                icon = 'arrow-down'
-            
-            # Popup avec les informations détaillées
-            popup_text = f"""
-            <b>{row['ville']}</b><br>
-            Prix d'achat: {row['prix_achat_m2']:,.0f} €/m²<br>
-            Loyer: {row['loyer_m2_mois']:.0f} €/m²/mois<br>
-            <b>Rentabilité brute: {row['rentabilite_brute']:.1f}%</b><br>
-            Rentabilité nette: {row['rentabilite_nette']:.1f}%<br>
-            Cash-flow mensuel (50m²): {row['cash_flow_mensuel']:.0f} €<br>
-            Temps de retour: {row['temps_retour_annees']:.1f} ans<br>
-            <b>Score global: {row['score_rentabilite']:.1f}</b>
-            """
-            
-            folium.Marker(
-                location=[row['latitude'], row['longitude']],
-                popup=folium.Popup(popup_text, max_width=300),
-                tooltip=f"{row['ville']} - Rentabilité: {row['rentabilite_brute']:.1f}%",
-                icon=folium.Icon(color=color, icon=icon, prefix='fa')
-            ).add_to(m)
+                return 'darkred'
         
-        # Ajouter une légende
-        legend_html = '''
+        # Ajouter les marqueurs
+        for idx, row in data_carte.iterrows():
+            folium.CircleMarker(
+                location=[row['latitude'], row['longitude']],
+                radius=8,
+                popup=folium.Popup(f"""
+                <b>{row['Commune']}</b><br>
+                Prix achat: {row['prix_m2_moyen']:.0f}€/m²<br>
+                Loyer: {row['loypredm2']:.1f}€/m²/mois<br>
+                <b>Rentabilité brute: {row['rentabilite_brute']:.2f}%</b><br>
+                Attractivité: {row['attractivite']}
+                """, max_width=300),
+                color='black',
+                fillColor=get_color(row['rentabilite_brute']),
+                fillOpacity=0.8,
+                weight=1
+            ).add_to(carte)
+        
+        # Légende
+        legend_html = """
         <div style="position: fixed; 
                     bottom: 50px; left: 50px; width: 200px; height: 120px; 
                     background-color: white; border:2px solid grey; z-index:9999; 
                     font-size:14px; padding: 10px">
-        <h4>Légende Rentabilité</h4>
-        <p><i class="fa fa-arrow-up" style="color:green"></i> Excellente (>70%)</p>
-        <p><i class="fa fa-minus" style="color:orange"></i> Moyenne (40-70%)</p>
-        <p><i class="fa fa-arrow-down" style="color:red"></i> Faible (<40%)</p>
+        <p><b>Rentabilité brute</b></p>
+        <p><i class="fa fa-circle" style="color:green"></i> ≥ 8% - Excellente</p>
+        <p><i class="fa fa-circle" style="color:lightgreen"></i> 6-8% - Très bonne</p>
+        <p><i class="fa fa-circle" style="color:orange"></i> 4-6% - Bonne</p>
+        <p><i class="fa fa-circle" style="color:red"></i> 2-4% - Correcte</p>
+        <p><i class="fa fa-circle" style="color:darkred"></i> < 2% - Faible</p>
         </div>
-        '''
-        m.get_root().html.add_child(folium.Element(legend_html))
+        """
+        carte.get_root().html.add_child(folium.Element(legend_html))
         
-        return m
+        return carte
     
-    def create_comparison_charts(self):
-        """Crée des graphiques de comparaison"""
-        # Graphique 1: Rentabilité vs Prix d'achat
-        fig1 = px.scatter(
-            self.data, 
-            x='prix_achat_m2', 
-            y='rentabilite_brute',
-            size='population',
-            color='score_rentabilite',
-            hover_name='ville',
-            title="Rentabilité Brute vs Prix d'Achat",
-            labels={
-                'prix_achat_m2': 'Prix d\'achat (€/m²)',
-                'rentabilite_brute': 'Rentabilité brute (%)',
-                'score_rentabilite': 'Score'
-            },
-            color_continuous_scale='RdYlGn'
-        )
+    def analyser_top_communes(self, n=20):
+        """Analyse les meilleures communes pour investir"""
+        if self.data_merged is None:
+            return None
         
-        # Graphique 2: Top 10 des villes par rentabilité
-        top_cities = self.data.nlargest(10, 'rentabilite_brute')
-        fig2 = px.bar(
-            top_cities,
-            x='rentabilite_brute',
-            y='ville',
-            orientation='h',
-            title="Top 10 - Rentabilité Brute",
-            labels={'rentabilite_brute': 'Rentabilité brute (%)'},
-            color='rentabilite_brute',
-            color_continuous_scale='RdYlGn'
-        )
-        fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
+        # Filtrer les communes avec un minimum de données
+        data_filtered = self.data_merged[
+            (self.data_merged['nb_ventes'] >= 3) &
+            (self.data_merged['rentabilite_brute'] > 0)
+        ].copy()
         
-        # Graphique 3: Cash-flow mensuel
-        fig3 = px.bar(
-            self.data.sort_values('cash_flow_mensuel', ascending=True),
-            x='cash_flow_mensuel',
-            y='ville',
-            orientation='h',
-            title="Cash-flow Mensuel par Ville (appartement 50m²)",
-            labels={'cash_flow_mensuel': 'Cash-flow mensuel (€)'},
-            color='cash_flow_mensuel',
-            color_continuous_scale='RdYlGn'
-        )
-        fig3.update_layout(yaxis={'categoryorder': 'total ascending'})
+        # Top communes par rentabilité
+        top_communes = data_filtered.nlargest(n, 'rentabilite_brute')
         
-        return fig1, fig2, fig3
+        return top_communes[['Commune', 'departement', 'prix_m2_moyen', 'loypredm2', 
+                            'rentabilite_brute', 'rentabilite_nette', 'attractivite', 'nb_ventes']]
     
-    def get_investment_summary(self):
-        """Retourne un résumé des meilleures opportunités"""
-        # Top 5 par rentabilité brute
-        top_rentability = self.data.nlargest(5, 'rentabilite_brute')[['ville', 'rentabilite_brute', 'prix_achat_m2']]
+    def creer_graphiques_analyse(self):
+        """Crée des graphiques d'analyse"""
+        if self.data_merged is None:
+            return None
         
-        # Top 5 par cash-flow
-        top_cashflow = self.data.nlargest(5, 'cash_flow_mensuel')[['ville', 'cash_flow_mensuel', 'loyer_mensuel_total']]
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                'Distribution de la rentabilité brute',
+                'Prix vs Loyer par département',
+                'Top 15 communes - Rentabilité',
+                'Répartition par attractivité'
+            ),
+            specs=[[{"secondary_y": False}, {"secondary_y": False}],
+                   [{"secondary_y": False}, {"secondary_y": False}]]
+        )
         
-        # Top 5 par score global
-        top_score = self.data.nlargest(5, 'score_rentabilite')[['ville', 'score_rentabilite', 'rentabilite_brute', 'cash_flow_mensuel']]
+        # 1. Histogramme rentabilité
+        fig.add_trace(
+            go.Histogram(x=self.data_merged['rentabilite_brute'], nbinsx=50, name='Rentabilité'),
+            row=1, col=1
+        )
         
-        return {
-            'top_rentability': top_rentability,
-            'top_cashflow': top_cashflow,
-            'top_score': top_score
-        }
+        # 2. Scatter plot prix vs loyer
+        fig.add_trace(
+            go.Scatter(
+                x=self.data_merged['prix_m2_moyen'],
+                y=self.data_merged['loypredm2'],
+                mode='markers',
+                text=self.data_merged['Commune'],
+                name='Communes',
+                marker=dict(size=6, opacity=0.6)
+            ),
+            row=1, col=2
+        )
+        
+        # 3. Top communes
+        top_15 = self.data_merged.nlargest(15, 'rentabilite_brute')
+        fig.add_trace(
+            go.Bar(
+                x=top_15['rentabilite_brute'],
+                y=top_15['Commune'],
+                orientation='h',
+                name='Top communes'
+            ),
+            row=2, col=1
+        )
+        
+        # 4. Répartition attractivité
+        attractivite_counts = self.data_merged['attractivite'].value_counts()
+        fig.add_trace(
+            go.Pie(
+                labels=attractivite_counts.index,
+                values=attractivite_counts.values,
+                name='Attractivité'
+            ),
+            row=2, col=2
+        )
+        
+        fig.update_layout(height=800, showlegend=False, title_text="Analyse de Rentabilité Immobilière")
+        return fig
 
+    def traitement_complet_avec_progress(self, fichier_dvf, fichier_loyers):
+        """Traitement complet avec barre de progression"""
+        
+        # Créer les éléments de progression
+        progress_container = st.container()
+        
+        with progress_container:
+            st.write("### 📈 Progression de l'analyse")
+            
+            # Barre de progression et status
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Métriques en temps réel
+            col1, col2, col3 = st.columns(3)
+            
+            try:
+                # Étape 1 : Chargement DVF (0-20%)
+                status_text.text('📁 Chargement du fichier DVF...')
+                with col1:
+                    st.metric("Étape", "1/6")
+                with col2:
+                    st.metric("Progression", "0%")
+                with col3:
+                    st.metric("Statut", "En cours")
+                
+                self.data_dvf = pd.read_csv(fichier_dvf, sep=';', encoding='latin-1')
+                progress_bar.progress(20)
+                st.write(f"✅ DVF chargé: {len(self.data_dvf):,} lignes")
+                
+                # Étape 2 : Chargement loyers (20-35%)
+                status_text.text('📁 Chargement du fichier loyers...')
+                with col1:
+                    st.metric("Étape", "2/6")
+                with col2:
+                    st.metric("Progression", "20%")
+                
+                self.data_loyers = pd.read_csv(fichier_loyers, sep=';', encoding='latin-1')
+                progress_bar.progress(35)
+                st.write(f"✅ Loyers chargé: {len(self.data_loyers):,} lignes")
+                
+                # Étape 3 : Nettoyage DVF (35-55%)
+                status_text.text('🧹 Nettoyage des données DVF...')
+                with col1:
+                    st.metric("Étape", "3/6")
+                with col2:
+                    st.metric("Progression", "35%")
+                
+                self.nettoyer_donnees_dvf()
+                progress_bar.progress(55)
+                st.write(f"✅ DVF nettoyé: {len(self.data_dvf):,} appartements valides")
+                
+                # Étape 4 : Nettoyage loyers (55-70%)
+                status_text.text('🧹 Nettoyage des données loyers...')
+                with col1:
+                    st.metric("Étape", "4/6")
+                with col2:
+                    st.metric("Progression", "55%")
+                
+                self.nettoyer_donnees_loyers()
+                progress_bar.progress(70)
+                st.write(f"✅ Loyers nettoyé: {len(self.data_loyers):,} observations valides")
+                
+                # Étape 5 : Fusion (70-85%)
+                status_text.text('🔗 Fusion des données...')
+                with col1:
+                    st.metric("Étape", "5/6")
+                with col2:
+                    st.metric("Progression", "70%")
+                
+                self.fusionner_donnees()
+                progress_bar.progress(85)
+                st.write(f"✅ Données fusionnées: {len(self.data_merged):,} communes")
+                
+                # Étape 6 : Calculs (85-100%)
+                status_text.text('📊 Calcul des rentabilités...')
+                with col1:
+                    st.metric("Étape", "6/6")
+                with col2:
+                    st.metric("Progression", "85%")
+                
+                self.calculer_rentabilite()
+                progress_bar.progress(100)
+                
+                # Status final
+                status_text.text('✅ Analyse terminée avec succès!')
+                with col2:
+                    st.metric("Progression", "100%")
+                with col3:
+                    st.metric("Statut", "Terminé")
+                
+                time.sleep(1)  # Laisser voir le 100%
+                
+                # Nettoyage des éléments de progression
+                progress_bar.empty()
+                status_text.empty()
+                
+                return True
+                
+            except Exception as e:
+                status_text.text(f'❌ Erreur: {str(e)}')
+                with col3:
+                    st.metric("Statut", "Erreur")
+                st.error(f"Erreur lors du traitement: {e}")
+                return False
+
+    
+    def generer_rapport(self):
+        """Génère un rapport de synthèse"""
+        if self.data_merged is None:
+            return "Aucune donnée disponible"
+        
+        stats = self.data_merged.describe()
+        
+        rapport = f"""
+    RAPPORT D'ANALYSE DE RENTABILITÉ IMMOBILIÈRE
+    ===========================================
+
+    📊 STATISTIQUES GÉNÉRALES
+    - Nombre de communes analysées: {len(self.data_merged)}
+    - Prix moyen d'achat: {self.data_merged['prix_m2_moyen'].mean():.0f}€/m²
+    - Loyer moyen: {self.data_loyers['loypredm2'].mean():.2f}€/m²/mois
+    - Rentabilité brute moyenne: {self.data_merged['rentabilite_brute'].mean():.2f}%
+
+    🏆 MEILLEURES OPPORTUNITÉS (Top 5)
+    """
+        
+        top_5 = self.data_merged.nlargest(5, 'rentabilite_brute')
+        for i, (_, row) in enumerate(top_5.iterrows(), 1):
+            # Convertir le département en entier si c'est une string
+            dept = str(row['departement']).zfill(2) if isinstance(row['departement'], (int, float, str)) else row['departement']
+            
+            rapport += f"""
+    {i}. {row['Commune']} ({dept})
+    💰 Prix: {row['prix_m2_moyen']:.0f}€/m² | Loyer: {row['loypredm2']:.1f}€/m²
+    📈 Rentabilité: {row['rentabilite_brute']:.2f}% | Attractivité: {row['attractivite']}
+    """
+        
+        rapport += f"""
+    📊 RÉPARTITION PAR ATTRACTIVITÉ
+    {self.data_merged['attractivite'].value_counts().to_string()}
+
+    ⚠️ NOTES IMPORTANTES
+    - Ces calculs sont basés sur des données moyennes
+    - La rentabilité réelle dépend de nombreux facteurs (charges, vacance, travaux...)
+    - Il est recommandé de faire une étude détaillée avant tout investissement
+    - Les données de loyer sont des estimations prédictives
+    """
+    
+        return rapport
+
+# Interface Streamlit
 def main():
-    st.set_page_config(page_title="Analyseur Rentabilité Immobilière", layout="wide")
+    st.set_page_config(
+        page_title="Analyseur de Rentabilité Immobilière",
+        page_icon="🏠",
+        layout="wide"
+    )
     
-    st.title("🏠 Analyseur de Rentabilité Immobilière - France")
-    st.markdown("### Comparaison des opportunités d'investissement immobilier")
-    
-    # Initialiser l'analyseur
-    analyzer = RealEstateAnalyzer()
+    st.title("🏠 Analyseur de Rentabilité Immobilière")
+    st.markdown("*Analysez la rentabilité des investissements immobiliers en France*")
     
     # Sidebar pour les paramètres
-    st.sidebar.header("Paramètres d'Analyse")
-    surface_appartement = st.sidebar.slider("Surface de l'appartement (m²)", 20, 100, 50)
-    taux_emprunt = st.sidebar.slider("Taux d'emprunt (%)", 1.0, 6.0, 3.5) / 100
-    apport_personnel = st.sidebar.slider("% d'apport personnel", 10, 50, 20)
+    st.sidebar.header("📁 Chargement des données")
     
-    # Charger les données
-    with st.spinner("Chargement des données..."):
-        analyzer.load_sample_data()
+    fichier_dvf = st.sidebar.file_uploader("Fichier DVF (ventes)", type=['csv'])
+    fichier_loyers = st.sidebar.file_uploader("Fichier Loyers", type=['csv'])
     
-    # Tabs pour organiser l'interface
-    tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Carte Interactive", "📊 Graphiques", "📈 Classements", "💡 Recommandations"])
-    
-    with tab1:
-        st.subheader("Carte de Rentabilité par Ville")
-        st.markdown("*Cliquez sur les marqueurs pour voir les détails*")
+    if fichier_dvf and fichier_loyers:
+        # Initialiser l'analyseur
+        analyseur = AnalyseurRentabiliteImmobiliere()
         
-        # Créer et afficher la carte
-        map_france = analyzer.create_interactive_map()
-        st.components.v1.html(map_france._repr_html_(), height=600)
+        # Chargement et traitement des données
+        with st.spinner("Chargement et traitement des données..."):
+            if analyseur.charger_donnees(fichier_dvf, fichier_loyers):
+                analyseur.nettoyer_donnees_dvf()
+                analyseur.nettoyer_donnees_loyers()
+                analyseur.fusionner_donnees()
+                analyseur.calculer_rentabilite()
         
-    with tab2:
-        st.subheader("Analyses Comparatives")
-        
-        # Créer les graphiques
-        fig1, fig2, fig3 = analyzer.create_comparison_charts()
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.plotly_chart(fig1, use_container_width=True)
-        with col2:
-            st.plotly_chart(fig2, use_container_width=True)
-        
-        st.plotly_chart(fig3, use_container_width=True)
-    
-    with tab3:
-        st.subheader("Classements et Données Détaillées")
-        
-        # Obtenir le résumé
-        summary = analyzer.get_investment_summary()
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**🏆 Top 5 - Rentabilité Brute**")
-            st.dataframe(summary['top_rentability'].round(1))
-        
-        with col2:
-            st.markdown("**💰 Top 5 - Cash-flow Mensuel**")
-            st.dataframe(summary['top_cashflow'].round(0))
-        
-        with col3:
-            st.markdown("**⭐ Top 5 - Score Global**")
-            st.dataframe(summary['top_score'].round(1))
-        
-        # Tableau complet
-        st.subheader("Données Complètes")
-        display_columns = ['ville', 'prix_achat_m2', 'loyer_m2_mois', 'rentabilite_brute', 
-                          'rentabilite_nette', 'cash_flow_mensuel', 'score_rentabilite']
-        st.dataframe(analyzer.data[display_columns].round(1), use_container_width=True)
-    
-    with tab4:
-        st.subheader("💡 Recommandations d'Investissement")
-        
-        best_overall = analyzer.data.loc[analyzer.data['score_rentabilite'].idxmax()]
-        best_rentability = analyzer.data.loc[analyzer.data['rentabilite_brute'].idxmax()]
-        best_cashflow = analyzer.data.loc[analyzer.data['cash_flow_mensuel'].idxmax()]
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                label="🏆 Meilleur Score Global",
-                value=f"{best_overall['ville']}",
-                delta=f"{best_overall['score_rentabilite']:.1f} points"
-            )
-            st.write(f"Rentabilité: {best_overall['rentabilite_brute']:.1f}%")
-            st.write(f"Cash-flow: {best_overall['cash_flow_mensuel']:.0f}€/mois")
-        
-        with col2:
-            st.metric(
-                label="📈 Meilleure Rentabilité",
-                value=f"{best_rentability['ville']}",
-                delta=f"{best_rentability['rentabilite_brute']:.1f}%"
-            )
-            st.write(f"Prix: {best_rentability['prix_achat_m2']:,.0f}€/m²")
-            st.write(f"Loyer: {best_rentability['loyer_m2_mois']:.0f}€/m²/mois")
-        
-        with col3:
-            st.metric(
-                label="💰 Meilleur Cash-flow",
-                value=f"{best_cashflow['ville']}",
-                delta=f"{best_cashflow['cash_flow_mensuel']:.0f}€/mois"
-            )
-            st.write(f"Rentabilité: {best_cashflow['rentabilite_brute']:.1f}%")
-            st.write(f"Retour: {best_cashflow['temps_retour_annees']:.1f} ans")
-        
-        # Conseils généraux
-        st.markdown("---")
-        st.markdown("### 📋 Points Clés à Retenir")
-        st.markdown("""
-        - **Rentabilité brute** : Ratio loyer annuel / prix d'achat
-        - **Cash-flow** : Différence entre loyer perçu et charges (emprunt, taxes, entretien)
-        - **Score global** : Combinaison pondérée de tous les critères
-        - Les données sont basées sur des moyennes et peuvent varier selon le quartier
-        - Pensez à vérifier les tendances du marché local avant d'investir
-        """)
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("*💡 Cette application utilise des données d'exemple. Pour un investissement réel, consultez des sources officielles et des professionnels.*")
+        if analyseur.data_merged is not None:
+            st.success(f"✅ Analyse terminée - {len(analyseur.data_merged)} communes analysées")
+            
+            # Onglets principaux
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 Synthèse", "🗺️ Carte", "📈 Graphiques", "📋 Rapport"])
+            
+            with tab1:
+                st.header("Synthèse des résultats")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Communes analysées", len(analyseur.data_merged))
+                with col2:
+                    st.metric("Prix moyen/m²", f"{analyseur.data_merged['prix_m2_moyen'].mean():.0f}€")
+                with col3:
+                    st.metric("Loyer moyen/m²", f"{analyseur.data_merged['loypredm2'].mean():.1f}€")
+                with col4:
+                    st.metric("Rentabilité moyenne", f"{analyseur.data_merged['rentabilite_brute'].mean():.2f}%")
+                
+                st.subheader("🏆 Top 20 des meilleures communes pour investir")
+                top_communes = analyseur.analyser_top_communes(20)
+                if top_communes is not None:
+                    st.dataframe(
+                        top_communes.style.format({
+                            'prix_m2_moyen': '{:.0f}€',
+                            'loypredm2': '{:.1f}€',
+                            'rentabilite_brute': '{:.2f}%',
+                            'rentabilite_nette': '{:.2f}%'
+                        }),
+                        use_container_width=True
+                    )
+            
+            with tab2:
+                st.header("🗺️ Carte de rentabilité")
+                
+                # Option pour géocoder
+                if st.button("🌍 Générer la carte (géocodage des communes)"):
+                    with st.spinner("Géocodage en cours... (peut prendre quelques minutes)"):
+                        analyseur.obtenir_coordonnees_communes(50)  # Limité à 50 pour éviter timeout
+                        carte = analyseur.creer_carte_rentabilite()
+                        
+                        if carte:
+                            st.success("Carte générée avec succès!")
+                            # Note: Dans Streamlit, vous devriez utiliser folium_static pour afficher la carte
+                            # st.components.v1.html(carte._repr_html_(), height=600)
+                            st.info("Carte générée - utilisez folium_static pour l'affichage dans Streamlit")
+                        else:
+                            st.error("Impossible de générer la carte")
+            
+            with tab3:
+                st.header("📈 Analyses graphiques")
+                
+                fig = analyseur.creer_graphiques_analyse()
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            with tab4:
+                st.header("📋 Rapport détaillé")
+                
+                rapport = analyseur.generer_rapport()
+                st.text(rapport)
+                
+                # Bouton de téléchargement du rapport
+                st.download_button(
+                    label="📥 Télécharger le rapport",
+                    data=rapport,
+                    file_name="rapport_rentabilite_immobiliere.txt",
+                    mime="text/plain"
+                )
 
 if __name__ == "__main__":
-    main()
+    # Pour utilisation en ligne de commande
+    analyseur = AnalyseurRentabiliteImmobiliere()
+    
+    # Chargement des données
+    if analyseur.charger_donnees('./data/dvf.csv', './data/loyers.csv'):
+        print("✅ Données chargées")
+        
+        # Nettoyage
+        analyseur.nettoyer_donnees_dvf()
+        analyseur.nettoyer_donnees_loyers()
+        
+        # Fusion et calculs
+        if analyseur.fusionner_donnees():
+            analyseur.calculer_rentabilite()
+            
+            # Analyses
+            print("\n📊 ANALYSE TERMINÉE")
+            print(f"Communes analysées: {len(analyseur.data_merged)}")
+            
+            # Top communes
+            top_communes = analyseur.analyser_top_communes(10)
+            print("\n🏆 TOP 10 COMMUNES:")
+            print(top_communes.to_string(index=False))
+            
+            # Sauvegarde des résultats
+            analyseur.data_merged.to_csv('resultats_rentabilite.csv', index=False, sep=';')
+            print("\n💾 Résultats sauvegardés dans 'resultats_rentabilite.csv'")
+            
+            # Rapport
+            rapport = analyseur.generer_rapport()
+            with open('rapport_rentabilite.txt', 'w', encoding='utf-8') as f:
+                f.write(rapport)
+            print("📋 Rapport sauvegardé dans 'rapport_rentabilite.txt'")
+        else:
+            print("❌ Erreur lors de la fusion des données")
+    else:
+        print("❌ Erreur lors du chargement des données")
