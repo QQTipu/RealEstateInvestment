@@ -2,6 +2,15 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from src.dvf_data_processing import get_dvf_data
+from src.loyer_data_processing import get_loyer_data
+
+def footer():
+    st.markdown('---')
+    st.markdown('*Application réalisé avec :streamlit: [Streamlit](https://streamlit.io/) par T. Fortuné.*')
+    st.markdown('''Calculs réalisés à partir des données :  
+        - [Carte des loyers](https://www.data.gouv.fr/datasets/carte-des-loyers-indicateurs-de-loyers-dannonce-par-commune-en-2024/) - Ministère de la Transition écologique  
+        - [Demandes de valeurs foncières](https://www.data.gouv.fr/datasets/demandes-de-valeurs-foncieres/) - Ministère de l'Economie, des Finances et de l'industrie
+        ''')
 
 def main():
     st.set_page_config(
@@ -10,11 +19,18 @@ def main():
         layout="wide"
     )
 
-    st.title("🏠 Accueil")
+    st.title("🏠 Marché immobilier")
     st.write("Bienvenue dans mon application Streamlit!")
 
+    st.write("Données DVF")
     df_dvf = get_dvf_data()
-    st.dataframe(df_dvf.head(100))
+    st.dataframe(df_dvf.head(1000))
+
+    st.write("Données de loyers")
+    loyers_df = get_loyer_data()
+    st.dataframe(loyers_df.head(1000))
+
+    footer()
 
 if __name__ == "__main__":
     try:
