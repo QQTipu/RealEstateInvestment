@@ -1,2 +1,4 @@
 rapport_rentabilite.txt
 resultats_rentabilite.csv
+.venv
+__pycache__
