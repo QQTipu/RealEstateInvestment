@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
-from src.data_processing import dvf_load_data
+from src.dvf_data_processing import get_dvf_data
 
 def main():
     st.set_page_config(
@@ -13,7 +13,7 @@ def main():
     st.title("🏠 Accueil")
     st.write("Bienvenue dans mon application Streamlit!")
 
-    df_dvf = dvf_load_data()
+    df_dvf = get_dvf_data()
     st.dataframe(df_dvf.head(100))
 
 if __name__ == "__main__":
