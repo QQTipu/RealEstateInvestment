@@ -12,6 +12,21 @@ def footer():
         - [Demandes de valeurs foncières](https://www.data.gouv.fr/datasets/demandes-de-valeurs-foncieres/) - Ministère de l'Economie, des Finances et de l'industrie
         ''')
 
+def tab_map():
+    return
+
+def tab_simulation():
+    return
+
+def tab_rawdata():
+    st.write("Données DVF")
+    df_dvf = get_dvf_data()
+    st.dataframe(df_dvf.head(1000))
+
+    st.write("Données de loyers")
+    loyers_df = get_loyer_data()
+    st.dataframe(loyers_df.head(1000))
+
 def main():
     st.set_page_config(
         page_title="Mon App",
@@ -22,13 +37,13 @@ def main():
     st.title("🏠 Marché immobilier")
     st.write("Bienvenue dans mon application Streamlit!")
 
-    st.write("Données DVF")
-    df_dvf = get_dvf_data()
-    st.dataframe(df_dvf.head(1000))
-
-    st.write("Données de loyers")
-    loyers_df = get_loyer_data()
-    st.dataframe(loyers_df.head(1000))
+    tab1, tab2, tab3 = st.tabs(["Carte de rentabilité", "Simulation de rentabilité", "Données brutes"])
+    with tab1:
+        tab_map()
+    with tab2:
+        tab_simulation()
+    with tab3:
+        tab_rawdata()
 
     footer()
 
