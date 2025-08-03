@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
-from src.dvf_data_processing import get_dvf_data
-from src.loyer_data_processing import get_loyer_data
+
+from src.data_processing.dvf_data_processing import get_dvf_data
+from src.data_processing.loyer_data_processing import get_loyer_data
+from src.data_processing.real_estate_calculation import get_calc_data
 
 def footer():
     st.markdown('---')
@@ -20,12 +22,16 @@ def tab_simulation():
 
 def tab_rawdata():
     st.write("Données DVF")
-    df_dvf = get_dvf_data()
-    st.dataframe(df_dvf.head(1000))
+    dvf_df = get_dvf_data()
+    st.dataframe(dvf_df.head(1000))
 
     st.write("Données de loyers")
     loyers_df = get_loyer_data()
     st.dataframe(loyers_df.head(1000))
+
+    st.write("Données mergées")
+    merged_df = get_calc_data(dvf_df, loyers_df)
+    st.dataframe(merged_df.head(1000))
 
 def main():
     st.set_page_config(
