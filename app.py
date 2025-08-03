@@ -35,7 +35,7 @@ def tab_rawdata():
 
 def main():
     st.set_page_config(
-        page_title="Mon App",
+        page_title="APP - Investissement immobilier",
         page_icon="📊",
         layout="wide"
     )
