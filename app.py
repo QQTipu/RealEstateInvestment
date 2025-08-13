@@ -11,7 +11,7 @@ def footer():
     st.markdown('*Application réalisé avec :streamlit: [Streamlit](https://streamlit.io/) par T. Fortuné.*')
     st.markdown('''Calculs réalisés à partir des données :  
         - [Carte des loyers](https://www.data.gouv.fr/datasets/carte-des-loyers-indicateurs-de-loyers-dannonce-par-commune-en-2024/) - Ministère de la Transition écologique  
-        - [Demandes de valeurs foncières](https://www.data.gouv.fr/datasets/demandes-de-valeurs-foncieres/) - Ministère de l'Economie, des Finances et de l'industrie
+        - [Demandes de valeurs foncières](https://www.data.gouv.fr/datasets/demandes-de-valeurs-foncieres/) - Ministère de l'Economie, des Finances et de l'Industrie
         ''')
 
 def tab_map():
