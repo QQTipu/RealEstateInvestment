@@ -15,6 +15,7 @@ def footer():
         ''')
 
 def tab_map():
+    st.map()
     return
 
 def tab_simulation():
