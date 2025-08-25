@@ -19,12 +19,21 @@ def tab_map():
     dvf_df = get_dvf_data()
     loyers_df = get_loyer_data()
     merged_df = get_calc_data(dvf_df, loyers_df)
-    geocoded_df = geocode_df(merged_df)
+    # geocoded_df = geocode_df(merged_df)
 
-    st.map(geocoded_df, latitude='lat', longitude='lon', color='prof_rate')
+    # st.map(geocoded_df, latitude='lat', longitude='lon', color='prof_rate')
     return
 
 def tab_simulation():
+    dvf_df = get_dvf_data()
+    loyers_df = get_loyer_data()
+
+    interest_rate = st.slider("Taux d'intérêt", min_value=0.0, max_value=10.0, value=3.0, format="%0.2f")
+    commune = st.selectbox("Commune du bien", loyers_df['LIBGEO'])
+    loyer_m2 = loyers_df[loyers_df['LIBGEO'] == commune]['loypredm2'].values[0]
+
+    st.write(f"{interest_rate}%")
+    st.write(f"{commune} - {loyer_m2} €/m²")
     return
 
 def tab_rawdata():
@@ -40,9 +49,9 @@ def tab_rawdata():
     merged_df = get_calc_data(dvf_df, loyers_df)
     st.dataframe(merged_df.head(1000))
 
-    st.write("Données géocodées")
-    geocoded_df = geocode_df(merged_df)
-    st.dataframe(geocoded_df.head(1000))
+    # st.write("Données géocodées")
+    # geocoded_df = geocode_df(merged_df)
+    # st.dataframe(geocoded_df.head(1000))
 
 def main():
     st.set_page_config(
