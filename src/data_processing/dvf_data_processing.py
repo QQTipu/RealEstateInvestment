@@ -32,7 +32,7 @@ def dvf_cleanup_data(dvf_df: pd.DataFrame) -> pd.DataFrame:
     Préparer les données brutes DVF.
     """
     cols_to_keep = ['Date mutation', 'Nature mutation', 'Type local', 'Nombre pieces principales', 'Valeur fonciere', 'Code postal','Commune', 'Code departement', 'Code commune', '1er lot', 'Surface Carrez du 1er lot', 'annee']
-    dvf_filtered = dvf_df[(dvf_df['Nature mutation'].str.contains('vente', case=False)) &
+    dvf_filtered = dvf_df[(dvf_df['Nature mutation'].str.match('vente', case=False)) &
                         (dvf_df['Type local'].str.contains('appartement', case=False)) &
                         (dvf_df['Nombre de lots'] == 1) &
                         (dvf_df['Nombre pieces principales'] <= 2.0)
