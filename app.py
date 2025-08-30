@@ -32,8 +32,8 @@ def tab_simulation():
     commune = st.selectbox("Commune du bien", loyers_df['LIBGEO'])
     loyer_m2 = loyers_df[loyers_df['LIBGEO'] == commune]['loypredm2'].values[0]
 
-    st.write(f"{interest_rate}%")
-    st.write(f"{commune} - {loyer_m2} €/m²")
+    st.write(f"Taux d'intérêt: {interest_rate}%")
+    st.write(f"Loyer au m² à {commune} : {loyer_m2} €/m²")
     return
 
 def tab_rawdata():
