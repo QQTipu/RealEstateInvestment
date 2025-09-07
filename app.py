@@ -5,7 +5,7 @@ import streamlit as st
 from src.data_processing.dvf_data_processing import get_dvf_data
 from src.data_processing.loyer_data_processing import get_loyer_data
 from src.data_processing.real_estate_calculation import get_calc_data
-from src.data_processing.map_data_processing import geocode_df
+from src.data_processing.map_data_processing import get_geocoded_data
 
 def footer():
     st.markdown('---')
@@ -19,13 +19,13 @@ def tab_map():
     dvf_df = get_dvf_data()
     loyers_df = get_loyer_data()
     merged_df = get_calc_data(dvf_df, loyers_df)
-    geocoded_df = geocode_df(merged_df).dropna(subset=['latitude', 'longitude'])
-    st.write(geocoded_df.dtypes)  # Affiche le pour
+    geocoded_df = get_geocoded_data(merged_df)
+    st.write(geocoded_df.dtypes)
 
     st.map(geocoded_df,
            latitude='latitude',
            longitude='longitude',
-           color='prof_rate'
+           color='prof_rate_color',
            )
     return
 
@@ -55,7 +55,7 @@ def tab_rawdata():
     st.dataframe(merged_df.head(1000))
 
     st.write("Données géocodées")
-    geocoded_df = geocode_df(merged_df)
+    geocoded_df = get_geocoded_data(merged_df)
     st.dataframe(geocoded_df.head(1000))
 
 def main():
