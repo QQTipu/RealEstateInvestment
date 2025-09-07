@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
+from src.data.data_dl_url import LOYERS_URL
+
 def loyer_cleanup_data(loyers_df: pd.DataFrame) -> pd.DataFrame:
     """
     Préparer les données brutes des loyers.
@@ -16,7 +18,7 @@ def loyer_load_data() -> pd.DataFrame:
     """
     Charge les données des loyers en DataFrame pandas et mise en cache.
     """
-    loyers_df = pd.read_csv('https://www.data.gouv.fr/fr/datasets/r/89956da9-5b9b-41d7-8703-18dbec4d54a2', encoding='latin-1', sep=';', decimal=',')
+    loyers_df = pd.read_csv(LOYERS_URL['2024'], encoding='latin-1', sep=';', decimal=',')
     loyers_df['annee'] = '2024'
     
     return loyers_df
