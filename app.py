@@ -5,7 +5,7 @@ import streamlit as st
 from src.data_processing.dvf_data_processing import get_dvf_data
 from src.data_processing.loyer_data_processing import get_loyer_data
 from src.data_processing.real_estate_calculation import get_calc_data
-from src.data_processing.map_data_processing import get_geocoded_data
+from src.data_processing.map_data_processing import get_geocoded_data, is_within_radius
 
 def footer():
     st.markdown('---')
@@ -22,11 +22,28 @@ def tab_map():
     geocoded_df = get_geocoded_data(merged_df)
     st.write(geocoded_df.dtypes)
 
+    query_commune = st.selectbox("Commune de recherche", geocoded_df['LIBGEO'])
+    query_commune_lat = geocoded_df[geocoded_df['LIBGEO'] == query_commune]['latitude'].values[0]
+    query_commune_lon = geocoded_df[geocoded_df['LIBGEO'] == query_commune]['longitude'].values[0]
+    query_radius = st.slider("Rayon de recherche (km)", min_value=0, max_value=500, value=50)
+
+    st.write(query_commune_lat)
+    st.write(query_commune_lat)
+    geocoded_df['in_radius'] = geocoded_df.apply(
+        lambda row: is_within_radius(query_commune_lat,
+                                     query_commune_lon,
+                                     query_radius,
+                                     row['latitude'],
+                                     row['longitude']),
+        axis=1)
+
+
     st.map(geocoded_df,
            latitude='latitude',
            longitude='longitude',
            color='prof_rate_color',
            )
+    st.dataframe(geocoded_df[geocoded_df['in_radius']].sort_values(by='prof_rate', ascending=False))
     return
 
 def tab_simulation():
